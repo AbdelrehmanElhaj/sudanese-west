@@ -1,0 +1,9 @@
+name: engine_west
+description: Pure Dart game engine for the Sudanese West card game.
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dev_dependencies:
+  test: ^1.24.0
