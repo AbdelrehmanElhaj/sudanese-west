@@ -112,6 +112,13 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
           'playerName': _playerName,
         });
       }
+      // If the host's connection dropped right as the match started, the
+      // initial GAME_STATE_BROADCAST is silently lost (_ws wasn't connected
+      // yet). Re-send it so guests aren't stuck waiting forever.
+      if (state.role == MultiplayerRole.host &&
+          state.lobbyPhase == LobbyPhase.inGame) {
+        _broadcastGameState();
+      }
     };
 
     ref.onDispose(() {
