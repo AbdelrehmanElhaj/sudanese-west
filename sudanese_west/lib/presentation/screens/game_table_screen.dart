@@ -159,7 +159,7 @@ class _ScoreBar extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _ScoreChip(
-              label: 'ش/ج',
+              label: teamShortName(Team.northSouth),
               score: ns,
               highlight: facade.winner == Team.northSouth),
           const Spacer(),
@@ -170,7 +170,7 @@ class _ScoreBar extends StatelessWidget {
                   fontWeight: FontWeight.w600)),
           const Spacer(),
           _ScoreChip(
-              label: 'ش/غ',
+              label: teamShortName(Team.eastWest),
               score: ew,
               highlight: facade.winner == Team.eastWest),
           const SizedBox(width: 8),
@@ -226,6 +226,14 @@ class _ScoreChip extends StatelessWidget {
 
 /// Compass-direction names by absolute seat index.
 const _kSeatNames = ['شمال', 'شرق', 'جنوب', 'غرب'];
+
+/// Team names shown throughout the game UI (score bar, overlays).
+String teamName(Team team) =>
+    team == Team.northSouth ? 'الفريق الأول' : 'الفريق الثاني';
+
+/// Compact team label for tight spaces (score chips, summary footer).
+String teamShortName(Team team) =>
+    team == Team.northSouth ? 'فريق 1' : 'فريق 2';
 
 String _playerDisplayName(
   int seatIndex,
@@ -929,8 +937,8 @@ class _RoundSummaryOverlay extends StatelessWidget {
 
     final bTeam = result.biddingTeam!;
     final oTeam = opposingTeam(bTeam);
-    final bTeamName = _teamName(bTeam);
-    final oTeamName = _teamName(oTeam);
+    final bTeamName = teamName(bTeam);
+    final oTeamName = teamName(oTeam);
     final bTricks = result.tricksWon[bTeam]!;
     final oTricks = result.tricksWon[oTeam]!;
     final success = bTricks >= result.bidValue!;
@@ -954,7 +962,8 @@ class _RoundSummaryOverlay extends StatelessWidget {
       title: success ? 'نجح المزايد ✓' : 'فشل المزايد ✗',
       titleColor: success ? Colors.greenAccent : Colors.redAccent,
       rows: rows,
-      footer: 'المجموع — ش/ج: $nsTotal  |  ش/غ: $ewTotal',
+      footer:
+          'المجموع — ${teamShortName(Team.northSouth)}: $nsTotal  |  ${teamShortName(Team.eastWest)}: $ewTotal',
     );
   }
 
@@ -1030,9 +1039,6 @@ class _RoundSummaryOverlay extends StatelessWidget {
       ),
     );
   }
-
-  String _teamName(Team team) =>
-      team == Team.northSouth ? 'شمال/جنوب' : 'شرق/غرب';
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1049,8 +1055,7 @@ class _MatchEndOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final winner = facade.winner;
     final match = facade.matchState;
-    final winnerName =
-        winner == Team.northSouth ? 'شمال / جنوب' : 'شرق / غرب';
+    final winnerName = teamName(winner ?? Team.eastWest);
     final isHumanWinner = winner == teamOf(facade.humanIndex);
 
     return Container(
@@ -1108,13 +1113,13 @@ class _MatchEndOverlay extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _FinalScore(
-                    label: 'شمال/جنوب',
+                    label: teamName(Team.northSouth),
                     score: match.scores[Team.northSouth]!,
                     isWinner: winner == Team.northSouth,
                   ),
                   const SizedBox(width: 24),
                   _FinalScore(
-                    label: 'شرق/غرب',
+                    label: teamName(Team.eastWest),
                     score: match.scores[Team.eastWest]!,
                     isWinner: winner == Team.eastWest,
                   ),
