@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'game_mode.dart';
 import 'round_result.dart';
 import 'team.dart';
@@ -19,9 +21,13 @@ class MatchState {
     required this.starterIndex,
   });
 
+  /// [starterIndex] picks who bids first in the match's opening round;
+  /// left unset, it is chosen at random (0–3). It then rotates by one seat
+  /// after every completed round via [applyRoundResult].
   factory MatchState.initial({
     int targetScore = 25,
     GameMode gameMode = GameMode.singlePlayerVsBots,
+    int? starterIndex,
   }) =>
       MatchState(
         scores: {Team.northSouth: 0, Team.eastWest: 0},
@@ -29,7 +35,7 @@ class MatchState {
         targetScore: targetScore,
         gameMode: gameMode,
         currentRoundNumber: 1,
-        starterIndex: 0,
+        starterIndex: starterIndex ?? Random().nextInt(4),
       );
 
   bool get isMatchOver {

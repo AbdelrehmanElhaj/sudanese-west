@@ -693,6 +693,7 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
   Widget _waitingPanel(int playerIndex) {
     final name = _playerDisplayName(
         playerIndex, widget.facade.humanIndex, widget.seatNames);
+    final currentBid = widget.facade.roundState?.bidState.bidValue;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -704,25 +705,41 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
           style: const TextStyle(color: Colors.white70, fontSize: 16),
           textDirection: TextDirection.rtl,
         ),
+        if (currentBid != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'المزايدة الحالية: $currentBid',
+            style: const TextStyle(color: Colors.white38, fontSize: 13),
+            textDirection: TextDirection.rtl,
+          ),
+        ],
       ],
     );
   }
 
   Widget _humanBidPanel() {
     final hand = widget.facade.humanHand;
+    final bidState = widget.facade.roundState?.bidState;
+    final currentBid = bidState?.bidValue;
+    final isLastTurn = bidState?.turnIndex == 3;
+    final canAccept = isLastTurn && currentBid != null;
 
     // Koz count for the currently selected (non-NT) trump suit.
     final int? kozCount = (_trumpDecided && _selectedTrump != null)
         ? hand.where((c) => c.suit == _selectedTrump).length
         : null;
 
-    // Minimum valid bid when this trump is chosen.
+    // Minimum valid bid: must beat the standing bid (if any) and, once a
+    // suited trump is chosen, satisfy the Koz rule.
     final int minBidForKoz = kozCount != null ? kozCount + 3 : 7;
+    final int minBidOverall =
+        currentBid != null ? currentBid + 1 : 7;
 
-    // A bid value is allowed when NT is chosen, trump not yet decided,
-    // or bid >= minBidForKoz.
+    // A bid value is allowed when it beats the standing bid, and — once a
+    // suited trump is chosen — also satisfies the Koz rule.
     bool bidAllowed(int b) =>
-        !_trumpDecided || _selectedTrump == null || b >= minBidForKoz;
+        b >= minBidOverall &&
+        (!_trumpDecided || _selectedTrump == null || b >= minBidForKoz);
 
     final selectionValid =
         _selectedBid == null || bidAllowed(_selectedBid!);
@@ -733,11 +750,11 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'اختر مزايدتك',
+        Text(
+          currentBid != null ? 'المزايدة الحالية: $currentBid' : 'اختر مزايدتك',
           textAlign: TextAlign.center,
           textDirection: TextDirection.rtl,
-          style: TextStyle(
+          style: const TextStyle(
               color: Colors.white,
               fontSize: 18,
               fontWeight: FontWeight.bold),
@@ -830,7 +847,7 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
                   side: const BorderSide(color: Colors.white24),
                 ),
                 onPressed: widget.onPass,
-                child: const Text('تمرير',
+                child: Text(canAccept ? 'قبول' : 'تمرير',
                     textDirection: TextDirection.rtl),
               ),
             ),

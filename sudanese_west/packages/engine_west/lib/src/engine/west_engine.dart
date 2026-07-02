@@ -175,6 +175,11 @@ class WestEngine implements GameFacade {
       throw ArgumentError(
           'Koz rule violated: too many trump cards for bid $bidValue');
     }
+    final currentBid = _round!.bidState.bidValue;
+    if (currentBid != null && bidValue <= currentBid) {
+      throw ArgumentError(
+          'Bid must be higher than the current standing bid ($currentBid)');
+    }
     final order = biddingOrder(_match.starterIndex);
     _applyBid(humanIndex, bidValue, trumpSuit, order);
   }
@@ -189,8 +194,16 @@ class WestEngine implements GameFacade {
       int playerIndex, int bidValue, Suit? trumpSuit, List<int> order) {
     final newBid = _bid.applyBid(
         _round!.bidState, order, playerIndex, bidValue, trumpSuit);
+    _round = _round!.copyWith(bidState: newBid);
+
+    if (!newBid.isComplete) {
+      // Not the last bidder yet — move on to the next player's turn.
+      _notify();
+      _advanceBotBids();
+      return;
+    }
+
     _round = _round!.copyWith(
-      bidState: newBid,
       currentTrick: TrickState(
         leadPlayerIndex: newBid.leadPlayerIndex!,
         trumpSuit: newBid.trumpSuit,
@@ -207,6 +220,20 @@ class WestEngine implements GameFacade {
 
     if (newBid.needsRedeal) {
       _finaliseRedeal();
+      return;
+    }
+
+    if (newBid.isComplete) {
+      // Last player accepted the standing bid as-is — start play.
+      _round = _round!.copyWith(
+        currentTrick: TrickState(
+          leadPlayerIndex: newBid.leadPlayerIndex!,
+          trumpSuit: newBid.trumpSuit,
+        ),
+      );
+      _phase = EnginePhase.playing;
+      _notify();
+      _scheduleBotPlay();
       return;
     }
 
@@ -232,7 +259,8 @@ class WestEngine implements GameFacade {
       if (r.bidState.isComplete) return;
       final c = o[r.bidState.turnIndex];
       if (c == humanIndex) return;
-      final action = _bot.decideBid(c, r.hands[c]);
+      final action =
+          _bot.decideBid(c, r.hands[c], currentBid: r.bidState.bidValue);
       if (action.bidValue != null) {
         _applyBid(c, action.bidValue!, action.trumpSuit, o);
       } else {

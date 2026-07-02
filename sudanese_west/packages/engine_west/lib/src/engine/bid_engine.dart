@@ -14,7 +14,10 @@ class BidEngine {
   }
 
   /// Returns the updated BidState after a player bids.
-  /// [order] is the biddingOrder list for this round.
+  /// [order] is the biddingOrder list for this round. Each of the 4 players
+  /// gets one turn; a bid must exceed the current standing bid (if any).
+  /// Bidding only completes once the last player in [order] has acted —
+  /// earlier bids just raise the standing bid and move to the next player.
   BidState applyBid(
     BidState state,
     List<int> order,
@@ -25,32 +28,41 @@ class BidEngine {
     assert(bidValue >= 7 && bidValue <= 13);
     assert(order[state.turnIndex] == playerIndex,
         'Not this player\'s turn to bid');
+    assert(state.bidValue == null || bidValue > state.bidValue!,
+        'Bid must be higher than the current standing bid');
 
+    final isLastTurn = state.turnIndex == order.length - 1;
     return state.copyWith(
       bidValue: bidValue,
       trumpSuit: () => trumpSuit,
       biddingPlayerIndex: playerIndex,
       biddingTeam: teamOf(playerIndex),
       leadPlayerIndex: playerIndex,
-      isComplete: true,
+      turnIndex: isLastTurn ? state.turnIndex : state.turnIndex + 1,
+      isComplete: isLastTurn,
     );
   }
 
   /// Returns the updated BidState after a player passes.
-  /// [order] is the biddingOrder list for this round.
+  /// [order] is the biddingOrder list for this round. If the last player
+  /// passes while a standing bid exists, they've accepted it as-is and
+  /// bidding completes with that bid. If nobody ever bid, it's a redeal.
   BidState applyPass(BidState state, List<int> order, int playerIndex) {
     assert(order[state.turnIndex] == playerIndex,
         'Not this player\'s turn to pass');
 
     final newPassed = List<bool>.from(state.passed);
     newPassed[state.turnIndex] = true;
-    final nextTurn = state.turnIndex + 1;
+    final isLastTurn = state.turnIndex == order.length - 1;
 
-    if (nextTurn >= 4) {
-      // All 4 players passed → redeal
+    if (isLastTurn) {
+      if (state.bidValue != null) {
+        // Last player accepts the standing bid as-is.
+        return state.copyWith(passed: newPassed, isComplete: true);
+      }
+      // Nobody ever bid → redeal.
       return state.copyWith(
         passed: newPassed,
-        turnIndex: nextTurn,
         needsRedeal: true,
         isComplete: true,
       );
@@ -58,7 +70,7 @@ class BidEngine {
 
     return state.copyWith(
       passed: newPassed,
-      turnIndex: nextTurn,
+      turnIndex: state.turnIndex + 1,
     );
   }
 

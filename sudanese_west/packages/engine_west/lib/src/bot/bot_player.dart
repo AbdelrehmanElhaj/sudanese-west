@@ -28,14 +28,19 @@ class BotPlayer {
 
   // ─── Bidding ────────────────────────────────────────────────────────────────
 
-  /// Decide bid or pass based on hand strength.
-  BotBidAction decideBid(int playerIndex, List<Card> hand) {
+  /// Decide bid or pass based on hand strength. [currentBid] is the current
+  /// standing bid (if any) — a bid must exceed it to be valid.
+  BotBidAction decideBid(int playerIndex, List<Card> hand,
+      {int? currentBid}) {
+    final floor = (currentBid ?? 6) + 1;
+    if (floor > 13) return const BotBidAction.pass();
+
     final strength = _handStrength(hand);
 
-    // < 7 points → pass
-    if (strength < 7) return const BotBidAction.pass();
+    // Below the required floor → pass
+    if (strength < floor.clamp(7, 13)) return const BotBidAction.pass();
 
-    int bid = strength.clamp(7, 13);
+    int bid = strength.clamp(floor.clamp(7, 13), 13);
     final trump = _bestTrumpSuit(hand);
 
     // Koz rule: if naming a suit, bid must be >= kozCount + 3.
@@ -45,7 +50,9 @@ class BotPlayer {
       if (bid < minBid) bid = minBid.clamp(7, 13);
     }
 
-    return BotBidAction.bid(bid.clamp(7, 13), trump);
+    if (bid < floor || bid > 13) return const BotBidAction.pass();
+
+    return BotBidAction.bid(bid, trump);
   }
 
   /// Count trick-taking potential: high cards (A=4,K=3,Q=2,J=1) + long suits.

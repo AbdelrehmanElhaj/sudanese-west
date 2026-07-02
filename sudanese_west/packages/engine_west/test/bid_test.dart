@@ -18,21 +18,35 @@ void main() {
       expect(biddingOrder(3), [3, 1, 0, 2]);
     });
 
-    test('bid completes immediately when first player bids', () {
+    test('a bid from the first player does not end bidding', () {
       final order = biddingOrder(0);
       var state = BidState.initial();
       state = engine.applyBid(state, order, 0, 9, Suit.hearts);
 
-      expect(state.isComplete, isTrue);
-      expect(state.needsRedeal, isFalse);
+      expect(state.isComplete, isFalse);
       expect(state.bidValue, 9);
       expect(state.trumpSuit, Suit.hearts);
       expect(state.biddingTeam, Team.northSouth);
       expect(state.biddingPlayerIndex, 0);
       expect(state.leadPlayerIndex, 0);
+      expect(engine.currentBidder(state, order), 2); // next in order
     });
 
-    test('partner bids after starter passes', () {
+    test('later players must raise the standing bid', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 9, Suit.hearts);
+
+      expect(() => engine.applyBid(state, order, 2, 9, null),
+          throwsA(isA<AssertionError>()));
+
+      state = engine.applyBid(state, order, 2, 10, null);
+      expect(state.bidValue, 10);
+      expect(state.biddingPlayerIndex, 2);
+      expect(state.isComplete, isFalse);
+    });
+
+    test('a middle player can pass without ending bidding', () {
       final order = biddingOrder(0); // [0,2,1,3]
       var state = BidState.initial();
       state = engine.applyPass(state, order, 0); // player 0 passes
@@ -40,13 +54,14 @@ void main() {
       expect(engine.currentBidder(state, order), 2); // partner
 
       state = engine.applyBid(state, order, 2, 8, null); // no-trump
-      expect(state.isComplete, isTrue);
+      expect(state.isComplete, isFalse);
       expect(state.biddingTeam, Team.northSouth);
       expect(state.biddingPlayerIndex, 2);
       expect(state.trumpSuit, isNull);
+      expect(engine.currentBidder(state, order), 1);
     });
 
-    test('opponent bids after both team-A members pass', () {
+    test('bidding completes once the last player in order bids', () {
       final order = biddingOrder(0); // [0,2,1,3]
       var state = BidState.initial();
       state = engine.applyPass(state, order, 0);
@@ -54,8 +69,45 @@ void main() {
       expect(engine.currentBidder(state, order), 1);
 
       state = engine.applyBid(state, order, 1, 7, Suit.spades);
+      expect(state.isComplete, isFalse);
+      expect(engine.currentBidder(state, order), 3);
+
+      state = engine.applyBid(state, order, 3, 8, null);
+      expect(state.isComplete, isTrue);
+      expect(state.needsRedeal, isFalse);
       expect(state.biddingTeam, Team.eastWest);
+      expect(state.bidValue, 8);
+    });
+
+    test(
+        'last player accepts the standing bid as-is by passing '
+        '(no redeal)', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 7, Suit.spades);
+      state = engine.applyPass(state, order, 2);
+      state = engine.applyPass(state, order, 1);
+      state = engine.applyPass(state, order, 3); // last player accepts
+
+      expect(state.isComplete, isTrue);
+      expect(state.needsRedeal, isFalse);
       expect(state.bidValue, 7);
+      expect(state.biddingPlayerIndex, 0);
+      expect(state.trumpSuit, Suit.spades);
+    });
+
+    test('last player may still raise instead of accepting', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 7, Suit.spades);
+      state = engine.applyPass(state, order, 2);
+      state = engine.applyPass(state, order, 1);
+      state = engine.applyBid(state, order, 3, 9, null);
+
+      expect(state.isComplete, isTrue);
+      expect(state.needsRedeal, isFalse);
+      expect(state.bidValue, 9);
+      expect(state.biddingPlayerIndex, 3);
     });
 
     test('redeal when all 4 pass', () {
