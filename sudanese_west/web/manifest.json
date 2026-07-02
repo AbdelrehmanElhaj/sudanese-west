@@ -1,12 +1,12 @@
 {
-    "name": "sudanese_west",
-    "short_name": "sudanese_west",
+    "name": "ويست السوداني",
+    "short_name": "ويست",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#1a3a2a",
+    "theme_color": "#1a3a2a",
+    "description": "لعبة الويست السودانية — العب أونلاين مع أصدقائك",
+    "orientation": "landscape-primary",
     "prefer_related_applications": false,
     "icons": [
         {
