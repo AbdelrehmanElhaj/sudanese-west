@@ -65,6 +65,8 @@ class GameTableScreen extends ConsumerWidget {
 
     final phase = facade.phase;
 
+    final isPlaying = phase == EnginePhase.playing;
+
     return Scaffold(
       backgroundColor: const Color(0xFF1B5E20),
       body: SafeArea(
@@ -84,13 +86,19 @@ class GameTableScreen extends ConsumerWidget {
               ],
             ),
 
-            // ── Overlays ────────────────────────────────────────────────────
+            // ── Overlays (do not cover the hand at bottom) ──────────────────
             if (phase == EnginePhase.bidding)
-              _BiddingOverlay(
-                facade: facade,
-                onBid: onBid,
-                onPass: onPass,
-                seatNames: seatNames,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 116,
+                child: _BiddingOverlay(
+                  facade: facade,
+                  onBid: onBid,
+                  onPass: onPass,
+                  seatNames: seatNames,
+                ),
               ),
 
             if (phase == EnginePhase.roundEnd)
@@ -98,6 +106,18 @@ class GameTableScreen extends ConsumerWidget {
 
             if (phase == EnginePhase.matchEnd)
               _MatchEndOverlay(facade: facade, onRestart: onRestartMatch),
+
+            // ── Human hand — always on top so it shows during bidding ───────
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _HumanHand(
+                facade: facade,
+                isPlaying: isPlaying,
+                onPlayCard: onPlayCard,
+              ),
+            ),
           ],
         ),
       ),
@@ -304,13 +324,8 @@ class _TableLayout extends StatelessWidget {
           ),
         ),
 
-        // ── Human hand (bottom) ────────────────────────────────────────────
-        _HumanHand(
-          facade: facade,
-          isPlaying: isPlaying,
-          onPlayCard: onPlayCard,
-        ),
-        const SizedBox(height: 8),
+        // Space reserved for the hand rendered in the Stack above
+        const SizedBox(height: 116),
       ],
     );
   }
@@ -686,7 +701,25 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
   }
 
   Widget _humanBidPanel() {
-    final canBid = _selectedBid != null && _trumpDecided;
+    final hand = widget.facade.humanHand;
+
+    // Koz count for the currently selected (non-NT) trump suit.
+    final int? kozCount = (_trumpDecided && _selectedTrump != null)
+        ? hand.where((c) => c.suit == _selectedTrump).length
+        : null;
+
+    // Minimum valid bid when this trump is chosen.
+    final int minBidForKoz = kozCount != null ? kozCount + 3 : 7;
+
+    // A bid value is allowed when NT is chosen, trump not yet decided,
+    // or bid >= minBidForKoz.
+    bool bidAllowed(int b) =>
+        !_trumpDecided || _selectedTrump == null || b >= minBidForKoz;
+
+    final selectionValid =
+        _selectedBid == null || bidAllowed(_selectedBid!);
+    final canBid =
+        _selectedBid != null && _trumpDecided && selectionValid;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -715,10 +748,33 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
               _BidChip(
                 label: '$b',
                 selected: _selectedBid == b,
-                onTap: () => setState(() => _selectedBid = b),
+                enabled: bidAllowed(b),
+                onTap: () {
+                  if (bidAllowed(b)) setState(() => _selectedBid = b);
+                },
               ),
           ],
         ),
+
+        // Koz hint — shown once a suited trump is picked.
+        if (kozCount != null && kozCount > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              minBidForKoz <= 13
+                  ? 'لديك $kozCount كوز — الحد الأدنى للتسمية $minBidForKoz'
+                  : 'لديك $kozCount كوز — لا يمكن تسمية هذا الكوز',
+              textAlign: TextAlign.center,
+              textDirection: TextDirection.rtl,
+              style: TextStyle(
+                color: minBidForKoz <= 13
+                    ? Colors.white54
+                    : Colors.orangeAccent,
+                fontSize: 11,
+              ),
+            ),
+          ),
+
         const SizedBox(height: 14),
 
         const Text('الأتم:',
@@ -737,6 +793,12 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
                 onTap: () => setState(() {
                   _selectedTrump = suit;
                   _trumpDecided = true;
+                  // Clear bid if it now violates the Koz rule.
+                  if (_selectedBid != null) {
+                    final koz =
+                        hand.where((c) => c.suit == suit).length;
+                    if (_selectedBid! < koz + 3) _selectedBid = null;
+                  }
                 }),
               ),
             _BidChip(
@@ -790,6 +852,7 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
 class _BidChip extends StatelessWidget {
   final String label;
   final bool selected;
+  final bool enabled;
   final Color? color;
   final VoidCallback onTap;
 
@@ -798,31 +861,38 @@ class _BidChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.color,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF2E7D32) : Colors.white10,
+          color: selected
+              ? const Color(0xFF2E7D32)
+              : (enabled ? Colors.white10 : Colors.white10.withValues(alpha: 0.4)),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? Colors.greenAccent : Colors.white24,
+            color: selected
+                ? Colors.greenAccent
+                : (enabled ? Colors.white24 : Colors.white12),
             width: selected ? 1.5 : 1,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color:
-                selected ? Colors.white : (color ?? Colors.white70),
+            color: selected
+                ? Colors.white
+                : (enabled ? (color ?? Colors.white70) : Colors.white24),
             fontSize: 16,
-            fontWeight:
-                selected ? FontWeight.bold : FontWeight.normal,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            decoration: enabled ? null : TextDecoration.lineThrough,
+            decorationColor: Colors.white24,
           ),
         ),
       ),

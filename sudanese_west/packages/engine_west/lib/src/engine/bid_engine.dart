@@ -1,8 +1,18 @@
 import '../models/bid_state.dart';
+import '../models/card.dart';
 import '../models/suit.dart';
 import '../models/team.dart';
 
 class BidEngine {
+  /// Koz rule: to name [trumpSuit] with [bidValue], the player must hold
+  /// at most (bidValue − 3) cards of that suit. NT bids are always valid.
+  static bool isKozRuleValid(
+      List<Card> hand, int bidValue, Suit? trumpSuit) {
+    if (trumpSuit == null) return true;
+    final kozCount = hand.where((c) => c.suit == trumpSuit).length;
+    return kozCount <= bidValue - 3;
+  }
+
   /// Returns the updated BidState after a player bids.
   /// [order] is the biddingOrder list for this round.
   BidState applyBid(

@@ -170,6 +170,11 @@ class WestEngine implements GameFacade {
 
   void humanBid(int bidValue, Suit? trumpSuit) {
     _assertPhase(EnginePhase.bidding);
+    if (!BidEngine.isKozRuleValid(
+        _round!.hands[humanIndex], bidValue, trumpSuit)) {
+      throw ArgumentError(
+          'Koz rule violated: too many trump cards for bid $bidValue');
+    }
     final order = biddingOrder(_match.starterIndex);
     _applyBid(humanIndex, bidValue, trumpSuit, order);
   }
@@ -193,7 +198,7 @@ class WestEngine implements GameFacade {
     );
     _phase = EnginePhase.playing;
     _notify();
-    _advanceBotPlays();
+    _scheduleBotPlay();
   }
 
   void _applyPass(int playerIndex, List<int> order) {
@@ -219,12 +224,21 @@ class WestEngine implements GameFacade {
     final current = order[round.bidState.turnIndex];
     if (current == humanIndex) return;
 
-    final action = _bot.decideBid(current, round.hands[current]);
-    if (action.bidValue != null) {
-      _applyBid(current, action.bidValue!, action.trumpSuit, order);
-    } else {
-      _applyPass(current, order);
-    }
+    // Small delay so the bidding overlay updates visually between each bot bid.
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (_phase != EnginePhase.bidding) return;
+      final o = biddingOrder(_match.starterIndex);
+      final r = _round!;
+      if (r.bidState.isComplete) return;
+      final c = o[r.bidState.turnIndex];
+      if (c == humanIndex) return;
+      final action = _bot.decideBid(c, r.hands[c]);
+      if (action.bidValue != null) {
+        _applyBid(c, action.bidValue!, action.trumpSuit, o);
+      } else {
+        _applyPass(c, o);
+      }
+    });
   }
 
   // ─── Play ─────────────────────────────────────────────────────────────────
@@ -243,7 +257,7 @@ class WestEngine implements GameFacade {
     if (!newTrick.isComplete) {
       _round = round.copyWith(currentTrick: newTrick, hands: newHands);
       _notify();
-      _advanceBotPlays();
+      _scheduleBotPlay();
       return;
     }
 
@@ -264,18 +278,24 @@ class WestEngine implements GameFacade {
       return;
     }
 
-    final nextTrick = _play.nextTrick(
-      newTrick.winnerIndex!,
-      round.bidState.trumpSuit,
-    );
+    // Show the completed trick briefly, then advance to the next one.
     _round = round.copyWith(
-      currentTrick: nextTrick,
+      currentTrick: newTrick,
       hands: newHands,
       tricksWon: newTricksWon,
       trickNumber: nextTrickNumber,
     );
     _notify();
-    _advanceBotPlays();
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (_phase != EnginePhase.playing) return;
+      final nextTrick = _play.nextTrick(
+        newTrick.winnerIndex!,
+        _round!.bidState.trumpSuit,
+      );
+      _round = _round!.copyWith(currentTrick: nextTrick);
+      _notify();
+      _scheduleBotPlay();
+    });
   }
 
   void _advanceBotPlays() {
@@ -340,4 +360,11 @@ class WestEngine implements GameFacade {
   }
 
   void _notify() => onStateChanged?.call();
+
+  // Schedules a single bot-play step after a short delay.
+  // Using Future.delayed breaks the synchronous recursion chain and lets the
+  // UI render each played card before the next one arrives.
+  void _scheduleBotPlay() {
+    Future.delayed(const Duration(milliseconds: 400), _advanceBotPlays);
+  }
 }

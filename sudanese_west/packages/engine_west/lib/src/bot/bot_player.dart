@@ -35,10 +35,17 @@ class BotPlayer {
     // < 7 points → pass
     if (strength < 7) return const BotBidAction.pass();
 
-    final bid = strength.clamp(7, 13);
+    int bid = strength.clamp(7, 13);
     final trump = _bestTrumpSuit(hand);
 
-    return BotBidAction.bid(bid, trump);
+    // Koz rule: if naming a suit, bid must be >= kozCount + 3.
+    if (trump != null) {
+      final kozCount = hand.where((c) => c.suit == trump).length;
+      final minBid = kozCount + 3;
+      if (bid < minBid) bid = minBid.clamp(7, 13);
+    }
+
+    return BotBidAction.bid(bid.clamp(7, 13), trump);
   }
 
   /// Count trick-taking potential: high cards (A=4,K=3,Q=2,J=1) + long suits.
