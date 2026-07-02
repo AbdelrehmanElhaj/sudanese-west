@@ -12,7 +12,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 /// re-authenticate (e.g. send REJOIN_ROOM).
 class WsClient {
   WebSocketChannel? _channel;
-  final _controller = StreamController<Map<String, dynamic>>.broadcast();
+  StreamController<Map<String, dynamic>> _controller =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   bool _disposed = false;
   bool _hasConnectedOnce = false;
@@ -27,6 +28,13 @@ class WsClient {
   bool get isConnected => _channel != null && !_disposed;
 
   Future<void> connect(String url) async {
+    // A prior disconnect() latches _disposed and closes the controller —
+    // undo both so this instance can be reused to join/host a new room.
+    if (_disposed) {
+      _controller = StreamController<Map<String, dynamic>>.broadcast();
+      _disposed = false;
+      _hasConnectedOnce = false;
+    }
     _url = url;
     _retryCount = 0;
     await _doConnect();

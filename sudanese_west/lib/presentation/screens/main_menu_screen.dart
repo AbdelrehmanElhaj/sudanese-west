@@ -2,14 +2,48 @@ import 'package:flutter/material.dart' hide Card;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/game_provider.dart';
+import '../../data/multiplayer_provider.dart';
 import 'game_table_screen.dart';
 import 'lobby_screen.dart';
+import 'waiting_room_screen.dart';
 
 class MainMenuScreen extends ConsumerWidget {
   const MainMenuScreen({super.key});
 
+  static void _openGameTable(BuildContext context, MultiplayerState state) {
+    final seatNames = Map<int, String>.fromEntries(
+      state.seats
+          .where((s) => s.playerName != null)
+          .map((s) => MapEntry(s.index, s.playerName!)),
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GameTableScreen(
+          multiplayerMode: state.role == MultiplayerRole.guest,
+          seatNames: seatNames,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // A guest may have backed out to the menu while the host started the
+    // match — jump them straight into the game table when that happens.
+    ref.listen<MultiplayerState>(multiplayerProvider, (prev, next) {
+      if (!context.mounted) return;
+      if (next.role == MultiplayerRole.guest &&
+          next.lobbyPhase == LobbyPhase.inGame &&
+          prev?.lobbyPhase != LobbyPhase.inGame) {
+        _openGameTable(context, next);
+      }
+    });
+
+    final mpState = ref.watch(multiplayerProvider);
+    final hasActiveRoom = mpState.roomCode != null &&
+        (mpState.lobbyPhase == LobbyPhase.waitingRoom ||
+            mpState.lobbyPhase == LobbyPhase.inGame);
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -80,6 +114,23 @@ class MainMenuScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    if (hasActiveRoom) ...[
+                      _RejoinRoomBanner(
+                        roomCode: mpState.roomCode!,
+                        onPressed: () {
+                          if (mpState.lobbyPhase == LobbyPhase.inGame) {
+                            _openGameTable(context, mpState);
+                          } else {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const WaitingRoomScreen(),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     _MenuButton(
                       icon: Icons.person,
                       label: 'لعب فردي',
@@ -125,6 +176,59 @@ class MainMenuScreen extends ConsumerWidget {
                 child: Text(
                   'Khatwa Tech • v0.1.0',
                   style: TextStyle(color: Colors.white24, fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RejoinRoomBanner extends StatelessWidget {
+  final String roomCode;
+  final VoidCallback onPressed;
+
+  const _RejoinRoomBanner({required this.roomCode, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFF9A825),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              const Icon(Icons.replay_circle_filled,
+                  color: Colors.black87, size: 24),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'لديك غرفة نشطة — العودة إليها',
+                      textDirection: TextDirection.rtl,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'الرمز: $roomCode',
+                      textDirection: TextDirection.rtl,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

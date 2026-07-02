@@ -41,11 +41,10 @@ class WaitingRoomScreen extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white70),
-          onPressed: () {
-            ref.read(multiplayerProvider.notifier).disconnect();
-            Navigator.of(context).pop();
-          },
+          // Just leaves the screen — the room and connection stay alive so
+          // the player can rejoin from the main menu instead of losing it.
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white70),
+          onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
           'غرفة الانتظار',
@@ -165,7 +164,19 @@ class WaitingRoomScreen extends ConsumerWidget {
               ),
             ],
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                ref.read(multiplayerProvider.notifier).disconnect();
+                Navigator.of(context).popUntil((r) => r.isFirst);
+              },
+              child: const Text(
+                'مغادرة الغرفة',
+                textDirection: TextDirection.rtl,
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
