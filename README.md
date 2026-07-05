@@ -8,8 +8,8 @@ A Flutter web/mobile implementation of the classic Sudanese West card game, supp
 
 ### Overview
 West is a trick-taking card game for 4 players in two partnerships:
-- **North / South** (شمال / جنوب)
-- **East / West** (شرق / غرب)
+- **الفريق-1** (Team-1): اللاعب-1 و اللاعب-2
+- **الفريق-2** (Team-2): اللاعب-1 و اللاعب-2
 
 Each round, 13 tricks are played. The winning team is the first to reach the target score (default: 25 points).
 

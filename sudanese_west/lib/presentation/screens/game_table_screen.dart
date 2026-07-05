@@ -28,6 +28,20 @@ class GameTableScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final mpState = ref.watch(multiplayerProvider);
+    final mpNotifier = ref.read(multiplayerProvider.notifier);
+
+    // A guest's connection can drop (host left, network error) at any point
+    // mid-match. Without this, the table just freezes on the last snapshot
+    // with no feedback — react by sending the player back to the menu.
+    ref.listen<MultiplayerState>(multiplayerProvider, (prev, next) {
+      if (!multiplayerMode) return;
+      if (next.lobbyPhase == LobbyPhase.error &&
+          prev?.lobbyPhase != LobbyPhase.error) {
+        _showConnectionLostDialog(context, ref, next.errorMessage);
+      }
+    });
+
     // Choose the data source and action callbacks based on mode.
     final GameFacade facade;
     final void Function(int, Suit?) onBid;
@@ -37,8 +51,6 @@ class GameTableScreen extends ConsumerWidget {
     final VoidCallback? onRestartMatch; // null = use built-in SP restart
 
     if (multiplayerMode) {
-      ref.watch(multiplayerProvider);
-      final mpNotifier = ref.read(multiplayerProvider.notifier);
       final f = mpNotifier.facade;
       if (f == null) {
         return const Scaffold(
@@ -60,7 +72,12 @@ class GameTableScreen extends ConsumerWidget {
       onPass = notifier.pass;
       onPlayCard = notifier.playCard;
       onNextRound = notifier.nextRound;
-      onRestartMatch = null; // uses _NewMatchStarter
+      // A host mid-multiplayer-match must start a fresh multiplayer match
+      // (re-broadcast to guests) instead of the single-player restart below,
+      // which would silently drop back to bot opponents and lose the room.
+      onRestartMatch = mpState.role == MultiplayerRole.host
+          ? mpNotifier.startHostGame
+          : null; // null → uses built-in SP restart (_NewMatchStarter)
     }
 
     final phase = facade.phase;
@@ -123,6 +140,36 @@ class GameTableScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+void _showConnectionLostDialog(
+    BuildContext context, WidgetRef ref, String? message) {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: const Color(0xFF1A3A1A),
+      title: const Text('انقطع الاتصال',
+          textDirection: TextDirection.rtl,
+          style: TextStyle(color: Colors.white)),
+      content: Text(
+        message ?? 'انقطع الاتصال بالخادم',
+        textDirection: TextDirection.rtl,
+        style: const TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(dialogContext).pop();
+            ref.read(multiplayerProvider.notifier).disconnect();
+            Navigator.of(context).popUntil((r) => r.isFirst);
+          },
+          child: const Text('القائمة الرئيسية',
+              textDirection: TextDirection.rtl),
+        ),
+      ],
+    ),
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -224,16 +271,13 @@ class _ScoreChip extends StatelessWidget {
 // Table layout — 4 player positions + trick center
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Compass-direction names by absolute seat index.
-const _kSeatNames = ['شمال', 'شرق', 'جنوب', 'غرب'];
-
 /// Team names shown throughout the game UI (score bar, overlays).
 String teamName(Team team) =>
-    team == Team.northSouth ? 'الفريق الأول' : 'الفريق الثاني';
+    team == Team.northSouth ? 'الفريق-1' : 'الفريق-2';
 
 /// Compact team label for tight spaces (score chips, summary footer).
 String teamShortName(Team team) =>
-    team == Team.northSouth ? 'فريق 1' : 'فريق 2';
+    team == Team.northSouth ? 'فريق-1' : 'فريق-2';
 
 String _playerDisplayName(
   int seatIndex,
@@ -245,7 +289,9 @@ String _playerDisplayName(
     return seatNames[seatIndex]!;
   }
   if (seatIndex == (humanIndex + 2) % 4) return 'شريكك';
-  return _kSeatNames[seatIndex];
+  // Within-team player number: seats 0/2 are team-1's player-1/player-2,
+  // seats 1/3 are team-2's player-1/player-2 (see teamOf/playersOf).
+  return 'اللاعب-${(seatIndex ~/ 2) + 1}';
 }
 
 class _TableLayout extends StatelessWidget {
@@ -1120,7 +1166,7 @@ class _MatchEndOverlay extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'فريق $winnerName فاز بالمباراة',
+                '$winnerName فاز بالمباراة',
                 style: const TextStyle(
                     color: Colors.white70, fontSize: 16),
                 textDirection: TextDirection.rtl,
