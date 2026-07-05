@@ -173,6 +173,12 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
   }
 
   Future<void> createRoom(String playerName) async {
+    // A previous room (soft-left via back navigation, or a finished match)
+    // may still be registered on this same connection — starting a new one
+    // without dropping it first would leave the old room's seat occupied by
+    // a socket that's no longer listening for it, and stale broadcasts from
+    // that room would leak into this new session.
+    if (state.roomCode != null) disconnect();
     _playerName = playerName.isEmpty ? 'لاعب' : playerName;
     await _ensureConnected();
     if (state.lobbyPhase == LobbyPhase.error) return;
@@ -183,6 +189,7 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
   }
 
   Future<void> joinRoom(String roomCode, String playerName) async {
+    if (state.roomCode != null) disconnect();
     _playerName = playerName.isEmpty ? 'لاعب' : playerName;
     await _ensureConnected();
     if (state.lobbyPhase == LobbyPhase.error) return;

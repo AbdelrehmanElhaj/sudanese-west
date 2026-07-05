@@ -92,6 +92,12 @@ class GameTableScreen extends ConsumerWidget {
         ? () => _confirmLeaveGame(context, ref,
             isHost: mpState.role == MultiplayerRole.host)
         : null;
+    // Match already ended — no confirmation needed, just drop the
+    // connection (if any) so a stale room isn't left registered server-side.
+    void onExitToMenu() {
+      if (isMultiplayerSession) mpNotifier.disconnect();
+      Navigator.of(context).popUntil((r) => r.isFirst);
+    }
 
     // My own seat was handed to a bot (disconnect / repeated timeout) —
     // let me tap anywhere to take it back.
@@ -132,14 +138,23 @@ class GameTableScreen extends ConsumerWidget {
                   onPass: onPass,
                   onAccept: onAccept,
                   seatNames: seatNames,
+                  onLeave: onLeave,
                 ),
               ),
 
             if (phase == EnginePhase.roundEnd)
-              _RoundSummaryOverlay(facade: facade, onNextRound: onNextRound),
+              _RoundSummaryOverlay(
+                facade: facade,
+                onNextRound: onNextRound,
+                onLeave: onLeave,
+              ),
 
             if (phase == EnginePhase.matchEnd)
-              _MatchEndOverlay(facade: facade, onRestart: onRestartMatch),
+              _MatchEndOverlay(
+                facade: facade,
+                onRestart: onRestartMatch,
+                onExit: onExitToMenu,
+              ),
 
             // ── Human hand — always on top so it shows during bidding ───────
             Positioned(
@@ -202,6 +217,33 @@ void _confirmLeaveGame(BuildContext context, WidgetRef ref,
       ],
     ),
   );
+}
+
+/// Corner close button for full-screen overlays (bidding, round summary) that
+/// would otherwise hide the score bar's back arrow underneath them, leaving
+/// no visible way to leave the match while the overlay is up.
+class _OverlayLeaveButton extends StatelessWidget {
+  final VoidCallback? onLeave;
+  const _OverlayLeaveButton({this.onLeave});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 8,
+      left: 8,
+      child: GestureDetector(
+        onTap: onLeave ?? () => Navigator.of(context).pop(),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: const BoxDecoration(
+            color: Colors.black45,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.close, color: Colors.white70, size: 20),
+        ),
+      ),
+    );
+  }
 }
 
 class _BotTakeoverBanner extends StatelessWidget {
@@ -781,6 +823,7 @@ class _BiddingOverlay extends ConsumerStatefulWidget {
   final VoidCallback onPass;
   final void Function(Suit?) onAccept;
   final Map<int, String>? seatNames;
+  final VoidCallback? onLeave;
 
   const _BiddingOverlay({
     required this.facade,
@@ -788,6 +831,7 @@ class _BiddingOverlay extends ConsumerStatefulWidget {
     required this.onPass,
     required this.onAccept,
     this.seatNames,
+    this.onLeave,
   });
 
   @override
@@ -810,22 +854,27 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
 
     return Container(
       color: Colors.black54,
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 24),
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A3A1A),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white24),
-            boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 20),
-            ],
+      child: Stack(
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A3A1A),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white24),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black54, blurRadius: 20),
+                ],
+              ),
+              child: isHumanTurn
+                  ? _humanBidPanel()
+                  : _waitingPanel(currentBidder),
+            ),
           ),
-          child: isHumanTurn
-              ? _humanBidPanel()
-              : _waitingPanel(currentBidder),
-        ),
+          _OverlayLeaveButton(onLeave: widget.onLeave),
+        ],
       ),
     );
   }
@@ -1079,9 +1128,10 @@ class _BidChip extends StatelessWidget {
 class _RoundSummaryOverlay extends StatelessWidget {
   final GameFacade facade;
   final VoidCallback onNextRound;
+  final VoidCallback? onLeave;
 
   const _RoundSummaryOverlay(
-      {required this.facade, required this.onNextRound});
+      {required this.facade, required this.onNextRound, this.onLeave});
 
   @override
   Widget build(BuildContext context) {
@@ -1141,65 +1191,70 @@ class _RoundSummaryOverlay extends StatelessWidget {
   }) {
     return Container(
       color: Colors.black54,
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 32),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A3A1A),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white24),
-            boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 20),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title,
-                  style: TextStyle(
-                      color: titleColor,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold),
-                  textDirection: TextDirection.rtl),
-              const SizedBox(height: 16),
-              const Divider(color: Colors.white24),
-              for (final (label, value) in rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(value,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                      Text(label,
-                          textDirection: TextDirection.rtl,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 14)),
-                    ],
-                  ),
-                ),
-              if (footer != null) ...[
-                const Divider(color: Colors.white24),
-                Text(footer,
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 13),
-                    textDirection: TextDirection.rtl),
-              ],
-              const SizedBox(height: 20),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D32)),
-                onPressed: onNextRound,
-                child: Text(isRedeal ? 'توزيع جديد' : 'جولة جديدة',
-                    textDirection: TextDirection.rtl),
+      child: Stack(
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A3A1A),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white24),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black54, blurRadius: 20),
+                ],
               ),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: titleColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold),
+                      textDirection: TextDirection.rtl),
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  for (final (label, value) in rows)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(value,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold)),
+                          Text(label,
+                              textDirection: TextDirection.rtl,
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 14)),
+                        ],
+                      ),
+                    ),
+                  if (footer != null) ...[
+                    const Divider(color: Colors.white24),
+                    Text(footer,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13),
+                        textDirection: TextDirection.rtl),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2E7D32)),
+                    onPressed: onNextRound,
+                    child: Text(isRedeal ? 'توزيع جديد' : 'جولة جديدة',
+                        textDirection: TextDirection.rtl),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
+          _OverlayLeaveButton(onLeave: onLeave),
+        ],
       ),
     );
   }
@@ -1212,8 +1267,10 @@ class _RoundSummaryOverlay extends StatelessWidget {
 class _MatchEndOverlay extends StatelessWidget {
   final GameFacade facade;
   final VoidCallback? onRestart;
+  final VoidCallback onExit;
 
-  const _MatchEndOverlay({required this.facade, this.onRestart});
+  const _MatchEndOverlay(
+      {required this.facade, this.onRestart, required this.onExit});
 
   @override
   Widget build(BuildContext context) {
@@ -1298,7 +1355,7 @@ class _MatchEndOverlay extends StatelessWidget {
                       foregroundColor: Colors.white70,
                       side: const BorderSide(color: Colors.white24),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: onExit,
                     child: const Text('القائمة',
                         textDirection: TextDirection.rtl),
                   ),

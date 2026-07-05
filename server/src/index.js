@@ -23,6 +23,35 @@ function sendError(ws, message) {
   send(ws, { type: MSG.ERROR, message });
 }
 
+// Removes ws from whatever room it's currently registered to, if any.
+// A client that soft-leaves (backs out without an explicit disconnect) and
+// then creates/joins a different room on the same socket would otherwise
+// keep occupying a seat in the old room forever — leaking that room's
+// broadcasts onto this socket and blocking the old room from ever being
+// pruned. Mirrors the cleanup done on an actual socket close.
+function leaveCurrentRoom(ws) {
+  const ctx = wsContext.get(ws);
+  if (!ctx) return;
+  const { room, seatIndex } = ctx;
+  const wasHost = seatIndex === 0;
+  const hadGame = room.lastState != null;
+
+  room.removePlayer(ws);
+  wsContext.delete(ws);
+
+  if (wasHost && hadGame) {
+    // The match can't continue without the host — end it for everyone
+    // and fully free the room instead of leaving guest seats reserved
+    // forever (which would block pruneEmpty from ever collecting it).
+    room.broadcast({ type: MSG.HOST_DISCONNECTED });
+    room.clearAllSeats();
+  } else {
+    room.broadcast({ type: MSG.SEAT_UPDATE, seats: room.seatInfo() });
+  }
+
+  roomManager.pruneEmpty();
+}
+
 // ── Message handler ───────────────────────────────────────────────────────────
 
 function handleMessage(ws, raw) {
@@ -47,6 +76,7 @@ function handleMessage(ws, raw) {
   }
 
   if (type === MSG.CREATE_ROOM) {
+    leaveCurrentRoom(ws);
     const room = roomManager.createRoom();
     const { seatIndex, token } = room.addPlayer(ws, msg.playerName || 'لاعب ١');
     wsContext.set(ws, { room, seatIndex });
@@ -63,6 +93,7 @@ function handleMessage(ws, raw) {
     if (!room) { sendError(ws, 'الغرفة غير موجودة'); return; }
     if (room.isFull) { sendError(ws, 'الغرفة ممتلئة'); return; }
 
+    leaveCurrentRoom(ws);
     const added = room.addPlayer(ws, msg.playerName || `لاعب ${room.seats.filter(Boolean).length}`);
     if (added === null) { sendError(ws, 'لا توجد مقاعد متاحة'); return; }
     const { seatIndex, token } = added;
@@ -145,22 +176,7 @@ wss.on('connection', (ws) => {
     const ctx = wsContext.get(ws);
     if (ctx) {
       const { room, seatIndex } = ctx;
-      const wasHost = seatIndex === 0;
-      const hadGame = room.lastState != null;
-
-      room.removePlayer(ws);
-
-      if (wasHost && hadGame) {
-        // The match can't continue without the host — end it for everyone
-        // and fully free the room instead of leaving guest seats reserved
-        // forever (which would block pruneEmpty from ever collecting it).
-        room.broadcast({ type: MSG.HOST_DISCONNECTED });
-        room.clearAllSeats();
-      } else {
-        room.broadcast({ type: MSG.SEAT_UPDATE, seats: room.seatInfo() });
-      }
-
-      roomManager.pruneEmpty();
+      leaveCurrentRoom(ws);
       console.log(`[${room.code}] Seat ${seatIndex} disconnected. Room ${room.isEmpty ? 'deleted' : 'still active'}.`);
     }
   });
