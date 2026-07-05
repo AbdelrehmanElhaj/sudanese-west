@@ -82,7 +82,7 @@ function handleMessage(ws, raw) {
 
     const targetSeat = typeof msg.seatIndex === 'number' ? msg.seatIndex : -1;
     if (targetSeat < 0 || targetSeat > 3) { sendError(ws, 'مقعد غير صالح'); return; }
-    if (room.seats[targetSeat] !== null) { sendError(ws, 'المقعد غير متاح للانضمام مجدداً'); return; }
+    if (room.seats[targetSeat]?.ws != null) { sendError(ws, 'المقعد غير متاح للانضمام مجدداً'); return; }
     if (!msg.token || room.seatTokens[targetSeat] !== msg.token) {
       sendError(ws, 'غير مصرح بإعادة الانضمام لهذا المقعد');
       return;
@@ -149,11 +149,15 @@ wss.on('connection', (ws) => {
       const hadGame = room.lastState != null;
 
       room.removePlayer(ws);
-      room.broadcast({ type: MSG.SEAT_UPDATE, seats: room.seatInfo() });
 
-      // Notify remaining guests if the host left mid-game.
       if (wasHost && hadGame) {
+        // The match can't continue without the host — end it for everyone
+        // and fully free the room instead of leaving guest seats reserved
+        // forever (which would block pruneEmpty from ever collecting it).
         room.broadcast({ type: MSG.HOST_DISCONNECTED });
+        room.clearAllSeats();
+      } else {
+        room.broadcast({ type: MSG.SEAT_UPDATE, seats: room.seatInfo() });
       }
 
       roomManager.pruneEmpty();

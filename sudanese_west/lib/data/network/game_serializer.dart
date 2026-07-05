@@ -127,6 +127,7 @@ class GameSerializer {
               },
             },
       'currentTurnSeat': currentTurnSeat,
+      'botControlledSeats': engine.botControlledSeats.toList(),
       'legalCards': currentTurnSeat >= 0
           ? engine.legalCardsForSeat(currentTurnSeat).map(encodeCard).toList()
           : <String>[],
@@ -242,6 +243,11 @@ class GameSerializer {
       );
     }
 
+    final botControlledSeats = ((json['botControlledSeats'] as List<dynamic>?)
+                ?.cast<int>() ??
+            const <int>[])
+        .toSet();
+
     // Legal cards (only populated when it's our turn)
     final currentTurnSeat = json['currentTurnSeat'] as int? ?? -1;
     var legalCards = <Card>[];
@@ -284,6 +290,7 @@ class GameSerializer {
       legalCards: legalCards,
       lastResult: lastResult,
       currentTurnSeat: currentTurnSeat,
+      botControlledSeats: botControlledSeats,
     );
   }
 }
@@ -298,6 +305,7 @@ class RemoteSnapshot {
   final List<Card> legalCards;
   final RoundResult? lastResult;
   final int currentTurnSeat; // -1 if nobody's turn (roundEnd / matchEnd)
+  final Set<int> botControlledSeats;
 
   Team? get winner => matchState.winner;
 
@@ -309,5 +317,6 @@ class RemoteSnapshot {
     required this.legalCards,
     required this.lastResult,
     required this.currentTurnSeat,
+    required this.botControlledSeats,
   });
 }

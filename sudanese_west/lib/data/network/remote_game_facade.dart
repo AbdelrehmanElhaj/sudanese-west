@@ -33,4 +33,7 @@ class RemoteGameFacade implements GameFacade {
 
   @override
   RoundResult? get lastRoundResult => _snapshot.lastResult;
+
+  @override
+  Set<int> get botControlledSeats => _snapshot.botControlledSeats;
 }

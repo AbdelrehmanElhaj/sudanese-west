@@ -21,7 +21,8 @@ enum LobbyPhase { idle, connecting, waitingRoom, inGame, error }
 class SeatInfo {
   final int index;
   final String? playerName;
-  const SeatInfo(this.index, this.playerName);
+  final bool connected;
+  const SeatInfo(this.index, this.playerName, {this.connected = true});
 }
 
 @immutable
@@ -198,6 +199,14 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
   /// responsibility.
   void startHostGame() {
     ref.read(gameNotifierProvider.notifier).startMultiplayerHost();
+    // Seats nobody ever joined (match started with fewer than 4 players)
+    // are bot-controlled from the first turn, same as a disconnect.
+    final engine = ref.read(gameNotifierProvider.notifier).engine;
+    for (final seat in state.seats) {
+      if (seat.playerName == null) {
+        engine.setSeatBotControlled(seat.index, true);
+      }
+    }
     state = state.copyWith(lobbyPhase: LobbyPhase.inGame);
     // Immediately push initial state to guests.
     _broadcastGameState();
@@ -270,6 +279,30 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     }
   }
 
+  /// Guest confirms they're back after their seat was handed to a bot
+  /// (disconnect or repeated timeout) — hands control back to them.
+  void sendReclaim() {
+    if (state.role != MultiplayerRole.guest) return;
+    _ws.send({
+      'type': WsProtocol.gameAction,
+      'action': {'type': WsProtocol.actionReclaimSeat},
+    });
+  }
+
+  /// Deliberately leaves an in-progress match. A guest's seat is handed to
+  /// a bot for the rest of the match; the host leaving ends it for everyone
+  /// (same as a host disconnect), since the host runs the authoritative
+  /// engine and there's nobody to hand control to.
+  void leaveGame() {
+    if (state.role == MultiplayerRole.guest) {
+      _ws.send({
+        'type': WsProtocol.gameAction,
+        'action': {'type': WsProtocol.actionLeave},
+      });
+    }
+    disconnect();
+  }
+
   void disconnect() {
     _sub?.cancel();
     _sub = null;
@@ -327,14 +360,32 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
 
     if (type == WsProtocol.seatUpdate) {
       final seatsJson = msg['seats'] as List<dynamic>;
-      final seats = seatsJson.map((s) {
+      final newSeats = seatsJson.map((s) {
         final sm = s as Map<String, dynamic>;
         return SeatInfo(
           sm['seatIndex'] as int,
           sm['playerName'] as String?,
+          connected: sm['connected'] as bool? ?? true,
         );
       }).toList();
-      state = state.copyWith(seats: seats);
+
+      // A guest's connection dropping mid-match would otherwise freeze that
+      // seat's turn forever — hand it to a bot the moment the drop is seen.
+      if (state.role == MultiplayerRole.host &&
+          state.lobbyPhase == LobbyPhase.inGame) {
+        final engine = ref.read(gameNotifierProvider.notifier).engine;
+        for (final seat in newSeats) {
+          if (seat.index == 0) continue; // host itself
+          final wasConnected = state.seats
+              .firstWhere((s) => s.index == seat.index, orElse: () => seat)
+              .connected;
+          if (wasConnected && !seat.connected) {
+            engine.setSeatBotControlled(seat.index, true);
+          }
+        }
+      }
+
+      state = state.copyWith(seats: newSeats);
       return;
     }
 
@@ -387,6 +438,10 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
         engine.applyPlayForSeat(seatIndex, card);
       } else if (actionType == WsProtocol.actionNextRound) {
         engine.proceedToNextRound();
+      } else if (actionType == WsProtocol.actionReclaimSeat) {
+        engine.setSeatBotControlled(seatIndex, false);
+      } else if (actionType == WsProtocol.actionLeave) {
+        engine.setSeatBotControlled(seatIndex, true);
       }
     } catch (e) {
       debugPrint('Ignored invalid relayed action from seat $seatIndex: $e');

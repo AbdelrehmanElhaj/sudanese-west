@@ -87,15 +87,28 @@ class GameTableScreen extends ConsumerWidget {
 
     final isPlaying = phase == EnginePhase.playing;
 
+    final isMultiplayerSession = mpState.role != MultiplayerRole.none;
+    final onLeave = isMultiplayerSession
+        ? () => _confirmLeaveGame(context, ref,
+            isHost: mpState.role == MultiplayerRole.host)
+        : null;
+
+    // My own seat was handed to a bot (disconnect / repeated timeout) —
+    // let me tap anywhere to take it back.
+    final myBotSeat = isMultiplayerSession &&
+        facade.botControlledSeats.contains(mpState.seatIndex);
+
     return Scaffold(
       backgroundColor: const Color(0xFF1B5E20),
       body: SafeArea(
-        child: Stack(
+        child: GestureDetector(
+          onTap: myBotSeat ? mpNotifier.sendReclaim : null,
+          child: Stack(
           children: [
             // ── Always visible: table ───────────────────────────────────────
             Column(
               children: [
-                _ScoreBar(facade: facade),
+                _ScoreBar(facade: facade, onLeave: onLeave),
                 Expanded(
                   child: _TableLayout(
                     facade: facade,
@@ -139,8 +152,75 @@ class GameTableScreen extends ConsumerWidget {
                 onPlayCard: onPlayCard,
               ),
             ),
+
+            if (myBotSeat)
+              const Positioned(
+                top: 56,
+                left: 24,
+                right: 24,
+                child: IgnorePointer(child: _BotTakeoverBanner()),
+              ),
           ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+void _confirmLeaveGame(BuildContext context, WidgetRef ref,
+    {required bool isHost}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: const Color(0xFF1A3A1A),
+      title: const Text('مغادرة المباراة',
+          textDirection: TextDirection.rtl,
+          style: TextStyle(color: Colors.white)),
+      content: Text(
+        isHost
+            ? 'أنت المضيف — مغادرتك ستنهي المباراة لجميع اللاعبين.'
+            : 'سيتولى البوت مقعدك لبقية المباراة. يمكنك العودة والانضمام مجدداً لاحقاً.',
+        textDirection: TextDirection.rtl,
+        style: const TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('إلغاء', textDirection: TextDirection.rtl),
+        ),
+        TextButton(
+          onPressed: () {
+            Navigator.of(dialogContext).pop();
+            ref.read(multiplayerProvider.notifier).leaveGame();
+            Navigator.of(context).popUntil((r) => r.isFirst);
+          },
+          child: const Text('مغادرة',
+              textDirection: TextDirection.rtl,
+              style: TextStyle(color: Colors.redAccent)),
+        ),
+      ],
+    ),
+  );
+}
+
+class _BotTakeoverBanner extends StatelessWidget {
+  const _BotTakeoverBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orangeAccent),
+      ),
+      child: const Text(
+        'تولى البوت مقعدك — المس الشاشة للعودة',
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.rtl,
+        style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
       ),
     );
   }
@@ -182,7 +262,10 @@ void _showConnectionLostDialog(
 
 class _ScoreBar extends StatelessWidget {
   final GameFacade facade;
-  const _ScoreBar({required this.facade});
+  /// Non-null while in an active multiplayer match (host or guest) — shows a
+  /// leave-confirmation flow instead of a plain back-navigation pop.
+  final VoidCallback? onLeave;
+  const _ScoreBar({required this.facade, this.onLeave});
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +287,7 @@ class _ScoreBar extends StatelessWidget {
       child: Row(
         children: [
           GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
+            onTap: onLeave ?? () => Navigator.of(context).pop(),
             child: const Icon(Icons.arrow_back_ios,
                 color: Colors.white70, size: 18),
           ),
@@ -287,15 +370,17 @@ String _playerDisplayName(
   int seatIndex,
   int humanIndex, [
   Map<int, String>? seatNames,
+  Set<int> botSeats = const {},
 ]) {
   if (seatIndex == humanIndex) return 'أنت';
-  if (seatNames != null && seatNames.containsKey(seatIndex)) {
-    return seatNames[seatIndex]!;
-  }
-  if (seatIndex == (humanIndex + 2) % 4) return 'شريكك';
-  // Within-team player number: seats 0/2 are team-1's player-1/player-2,
-  // seats 1/3 are team-2's player-1/player-2 (see teamOf/playersOf).
-  return 'اللاعب-${(seatIndex ~/ 2) + 1}';
+  final base = seatNames != null && seatNames.containsKey(seatIndex)
+      ? seatNames[seatIndex]!
+      : (seatIndex == (humanIndex + 2) % 4
+          // Within-team player number: seats 0/2 are team-1's
+          // player-1/player-2, seats 1/3 are team-2's (see teamOf/playersOf).
+          ? 'شريكك'
+          : 'اللاعب-${(seatIndex ~/ 2) + 1}');
+  return botSeats.contains(seatIndex) ? '🤖 $base' : base;
 }
 
 class _TableLayout extends StatelessWidget {
@@ -328,7 +413,8 @@ class _TableLayout extends StatelessWidget {
         // ── Partner (top) ──────────────────────────────────────────────────
         _PlayerSeat(
           playerIndex: topIdx,
-          displayName: _playerDisplayName(topIdx, h, seatNames),
+          displayName:
+              _playerDisplayName(topIdx, h, seatNames, facade.botControlledSeats),
           cardCount: round?.hands[topIdx].length ?? 0,
           tricksWon: round?.tricksWon[teamOf(topIdx)] ?? 0,
           isBidder: round?.bidState.biddingPlayerIndex == topIdx,
@@ -346,7 +432,8 @@ class _TableLayout extends StatelessWidget {
               // Left opponent
               _PlayerSeat(
                 playerIndex: leftIdx,
-                displayName: _playerDisplayName(leftIdx, h, seatNames),
+                displayName: _playerDisplayName(
+                    leftIdx, h, seatNames, facade.botControlledSeats),
                 cardCount: round?.hands[leftIdx].length ?? 0,
                 tricksWon: round?.tricksWon[teamOf(leftIdx)] ?? 0,
                 isBidder: round?.bidState.biddingPlayerIndex == leftIdx,
@@ -369,7 +456,8 @@ class _TableLayout extends StatelessWidget {
               // Right opponent
               _PlayerSeat(
                 playerIndex: rightIdx,
-                displayName: _playerDisplayName(rightIdx, h, seatNames),
+                displayName: _playerDisplayName(
+                    rightIdx, h, seatNames, facade.botControlledSeats),
                 cardCount: round?.hands[rightIdx].length ?? 0,
                 tricksWon: round?.tricksWon[teamOf(rightIdx)] ?? 0,
                 isBidder: round?.bidState.biddingPlayerIndex == rightIdx,
@@ -743,8 +831,8 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
   }
 
   Widget _waitingPanel(int playerIndex) {
-    final name = _playerDisplayName(
-        playerIndex, widget.facade.humanIndex, widget.seatNames);
+    final name = _playerDisplayName(playerIndex, widget.facade.humanIndex,
+        widget.seatNames, widget.facade.botControlledSeats);
     final currentBid = widget.facade.roundState?.bidState.bidValue;
     return Column(
       mainAxisSize: MainAxisSize.min,

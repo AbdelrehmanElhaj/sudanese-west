@@ -17,4 +17,8 @@ abstract class GameFacade {
   List<Card> legalCardsForHuman();
   Team? get winner;
   RoundResult? get lastRoundResult;
+
+  /// Seats currently driven by a bot substitute in multiplayer (disconnected,
+  /// repeatedly slow, or left). Always empty outside multiplayer.
+  Set<int> get botControlledSeats;
 }

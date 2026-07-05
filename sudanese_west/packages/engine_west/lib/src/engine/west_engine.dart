@@ -28,6 +28,23 @@ class WestEngine implements GameFacade {
   RoundState? _round;
   EnginePhase _phase = EnginePhase.idle;
 
+  // Seats currently driven by bot logic in multiplayer (disconnected, timed
+  // out repeatedly, or left). Irrelevant in single-player, where every
+  // non-human seat is implicitly bot-controlled.
+  final Set<int> _botSeats = {};
+
+  // Consecutive turn-timeout count per seat, used to escalate a merely-slow
+  // (but still connected) player to full bot control after repeated misses.
+  final Map<int, int> _timeoutStrikes = {};
+  final Duration _turnTimeout;
+  static const _timeoutStrikesLimit = 3;
+
+  // Bumped on every setSeatBotControlled call so a timeout timer armed
+  // before a control-status flip can detect it's stale and bail, even if
+  // _round hasn't changed in between (e.g. bot-on then bot-off in the same
+  // turn, before either arm actually got to act).
+  int _controlEpoch = 0;
+
   /// Human player index (always 0 in single-player mode).
   @override
   final int humanIndex;
@@ -43,6 +60,7 @@ class WestEngine implements GameFacade {
     Random? rng,
     void Function()? onStateChanged,
     this.multiplayerMode = false,
+    Duration turnTimeout = const Duration(seconds: 20),
   })  : humanIndex = humanIndex ?? 0,
         onStateChanged = onStateChanged,
         _deal = DealEngine(rng),
@@ -50,6 +68,7 @@ class WestEngine implements GameFacade {
         _play = PlayEngine(),
         _score = ScoreEngine(),
         _bot = BotPlayer(rng: rng),
+        _turnTimeout = turnTimeout,
         _match = MatchState.initial();
 
   // ─── GameFacade / Getters ─────────────────────────────────────────────────
@@ -76,7 +95,31 @@ class WestEngine implements GameFacade {
   RoundResult? get lastRoundResult =>
       _match.roundHistory.isEmpty ? null : _match.roundHistory.last;
 
+  @override
+  Set<int> get botControlledSeats => Set.unmodifiable(_botSeats);
+
   bool get isMatchOver => _phase == EnginePhase.matchEnd;
+
+  bool _isBotSeat(int seatIndex) =>
+      multiplayerMode ? _botSeats.contains(seatIndex) : seatIndex != humanIndex;
+
+  /// Marks [seatIndex] as bot-controlled (disconnected, repeatedly slow, or
+  /// left), or hands control back to its human occupant. No-op outside
+  /// multiplayer. Immediately drives the seat's pending turn if it's
+  /// currently their move.
+  void setSeatBotControlled(int seatIndex, bool isBotControlled) {
+    if (!multiplayerMode) return;
+    _controlEpoch++;
+    if (isBotControlled) {
+      _botSeats.add(seatIndex);
+    } else {
+      _botSeats.remove(seatIndex);
+      _timeoutStrikes.remove(seatIndex);
+    }
+    if (_round == null) return;
+    if (_phase == EnginePhase.bidding) _advanceBotBids();
+    if (_phase == EnginePhase.playing) _scheduleBotPlay();
+  }
 
   // ─── Multiplayer helpers ──────────────────────────────────────────────────
 
@@ -120,24 +163,28 @@ class WestEngine implements GameFacade {
 
   void applyBidForSeat(int seatIndex, int bidValue, Suit? trumpSuit) {
     _assertPhase(EnginePhase.bidding);
+    _timeoutStrikes.remove(seatIndex);
     final order = biddingOrder(_match.starterIndex);
     _applyBid(seatIndex, bidValue, trumpSuit, order);
   }
 
   void applyPassForSeat(int seatIndex) {
     _assertPhase(EnginePhase.bidding);
+    _timeoutStrikes.remove(seatIndex);
     final order = biddingOrder(_match.starterIndex);
     _applyPass(seatIndex, order);
   }
 
   void applyAcceptForSeat(int seatIndex, Suit? trumpSuit) {
     _assertPhase(EnginePhase.bidding);
+    _timeoutStrikes.remove(seatIndex);
     final order = biddingOrder(_match.starterIndex);
     _applyAccept(seatIndex, trumpSuit, order);
   }
 
   void applyPlayForSeat(int seatIndex, Card card) {
     _assertPhase(EnginePhase.playing);
+    _timeoutStrikes.remove(seatIndex);
     _applyCardPlay(seatIndex, card);
   }
 
@@ -260,36 +307,63 @@ class WestEngine implements GameFacade {
     _scheduleBotPlay();
   }
 
+  void _autoDecideBid(int seatIndex, List<int> order, RoundState round) {
+    final action = _bot.decideBid(seatIndex, round.hands[seatIndex],
+        currentBid: round.bidState.bidValue);
+    if (action.bidValue != null) {
+      _applyBid(seatIndex, action.bidValue!, action.trumpSuit, order);
+    } else if (round.bidState.turnIndex == order.length - 1 &&
+        round.bidState.bidValue != null) {
+      // Last bidder declining to raise must accept with their own trump.
+      final trump = _bot.decideAcceptTrump(
+          round.hands[seatIndex], round.bidState.bidValue!);
+      _applyAccept(seatIndex, trump, order);
+    } else {
+      _applyPass(seatIndex, order);
+    }
+  }
+
   void _advanceBotBids() {
-    if (multiplayerMode) return;
     if (_phase != EnginePhase.bidding) return;
     final order = biddingOrder(_match.starterIndex);
     final round = _round!;
     if (round.bidState.isComplete) return;
 
     final current = order[round.bidState.turnIndex];
-    if (current == humanIndex) return;
 
-    // Small delay so the bidding overlay updates visually between each bot bid.
-    Future.delayed(const Duration(milliseconds: 350), () {
+    if (_isBotSeat(current)) {
+      // Small delay so the bidding overlay updates visually between bids.
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (_phase != EnginePhase.bidding) return;
+        final o = biddingOrder(_match.starterIndex);
+        final r = _round!;
+        if (r.bidState.isComplete) return;
+        final c = o[r.bidState.turnIndex];
+        if (!_isBotSeat(c)) return;
+        _autoDecideBid(c, o, r);
+      });
+      return;
+    }
+
+    // A genuinely human (connected, not-yet-escalated) seat in multiplayer:
+    // arm a turn timeout so a slow player doesn't stall everyone forever.
+    if (!multiplayerMode) return;
+    final capturedRound = round;
+    final capturedEpoch = _controlEpoch;
+    Future.delayed(_turnTimeout, () {
       if (_phase != EnginePhase.bidding) return;
+      if (!identical(_round, capturedRound)) return; // they already acted
+      if (_controlEpoch != capturedEpoch) return; // bot status flipped since
       final o = biddingOrder(_match.starterIndex);
-      final r = _round!;
-      if (r.bidState.isComplete) return;
-      final c = o[r.bidState.turnIndex];
-      if (c == humanIndex) return;
-      final action =
-          _bot.decideBid(c, r.hands[c], currentBid: r.bidState.bidValue);
-      if (action.bidValue != null) {
-        _applyBid(c, action.bidValue!, action.trumpSuit, o);
-      } else if (r.bidState.turnIndex == o.length - 1 &&
-          r.bidState.bidValue != null) {
-        // Last bidder declining to raise must accept with their own trump.
-        final trump = _bot.decideAcceptTrump(r.hands[c], r.bidState.bidValue!);
-        _applyAccept(c, trump, o);
-      } else {
-        _applyPass(c, o);
+      final c = o[capturedRound.bidState.turnIndex];
+
+      final strikes = (_timeoutStrikes[c] ?? 0) + 1;
+      _timeoutStrikes[c] = strikes;
+      if (strikes >= _timeoutStrikesLimit) {
+        setSeatBotControlled(c, true);
+        return;
       }
+      _autoDecideBid(c, o, capturedRound);
     });
   }
 
@@ -356,8 +430,17 @@ class WestEngine implements GameFacade {
     });
   }
 
+  void _autoDecideCard(int seatIndex, RoundState round, TrickState trick) {
+    final card = _bot.decideCard(
+      playerIndex: seatIndex,
+      hand: round.hands[seatIndex],
+      trick: trick,
+      trickNumber: round.trickNumber,
+    );
+    _applyCardPlay(seatIndex, card);
+  }
+
   void _advanceBotPlays() {
-    if (multiplayerMode) return;
     if (_phase != EnginePhase.playing) return;
     final round = _round!;
     if (round.isRoundComplete) return;
@@ -366,15 +449,31 @@ class WestEngine implements GameFacade {
     final current =
         trick.isComplete ? trick.winnerIndex! : trick.nextPlayerIndex;
 
-    if (current == humanIndex) return;
+    if (_isBotSeat(current)) {
+      _autoDecideCard(current, round, trick);
+      return;
+    }
 
-    final card = _bot.decideCard(
-      playerIndex: current,
-      hand: round.hands[current],
-      trick: trick,
-      trickNumber: round.trickNumber,
-    );
-    _applyCardPlay(current, card);
+    // A genuinely human (connected, not-yet-escalated) seat in multiplayer:
+    // arm a turn timeout so a slow player doesn't stall everyone forever.
+    if (!multiplayerMode) return;
+    final capturedRound = round;
+    final capturedEpoch = _controlEpoch;
+    Future.delayed(_turnTimeout, () {
+      if (_phase != EnginePhase.playing) return;
+      if (!identical(_round, capturedRound)) return; // they already acted
+      if (_controlEpoch != capturedEpoch) return; // bot status flipped since
+      final t = capturedRound.currentTrick;
+      final c = t.isComplete ? t.winnerIndex! : t.nextPlayerIndex;
+
+      final strikes = (_timeoutStrikes[c] ?? 0) + 1;
+      _timeoutStrikes[c] = strikes;
+      if (strikes >= _timeoutStrikesLimit) {
+        setSeatBotControlled(c, true);
+        return;
+      }
+      _autoDecideCard(c, capturedRound, t);
+    });
   }
 
   // ─── Round / Match finalisation ────────────────────────────────────────────

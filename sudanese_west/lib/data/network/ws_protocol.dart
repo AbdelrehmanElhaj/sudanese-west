@@ -24,4 +24,6 @@ class WsProtocol {
   static const String actionAccept = 'ACCEPT';
   static const String actionPlayCard = 'PLAY_CARD';
   static const String actionNextRound = 'NEXT_ROUND';
+  static const String actionReclaimSeat = 'RECLAIM_SEAT';
+  static const String actionLeave = 'LEAVE';
 }
