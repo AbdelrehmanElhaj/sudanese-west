@@ -79,21 +79,68 @@ void main() {
       expect(state.bidValue, 8);
     });
 
-    test(
-        'last player accepts the standing bid as-is by passing '
-        '(no redeal)', () {
+    test('last player may not simply pass on a standing bid', () {
       final order = biddingOrder(0); // [0,2,1,3]
       var state = BidState.initial();
       state = engine.applyBid(state, order, 0, 7, Suit.spades, const []);
       state = engine.applyPass(state, order, 2);
       state = engine.applyPass(state, order, 1);
-      state = engine.applyPass(state, order, 3); // last player accepts
+
+      expect(() => engine.applyPass(state, order, 3),
+          throwsA(isA<StateError>()));
+    });
+
+    test(
+        'last player accepts the standing bid at its value, becoming the '
+        'new bidder with their own trump', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 7, Suit.spades, const []);
+      state = engine.applyPass(state, order, 2);
+      state = engine.applyPass(state, order, 1);
+      state = engine.applyAccept(state, order, 3, Suit.hearts, const []);
 
       expect(state.isComplete, isTrue);
       expect(state.needsRedeal, isFalse);
       expect(state.bidValue, 7);
-      expect(state.biddingPlayerIndex, 0);
-      expect(state.trumpSuit, Suit.spades);
+      expect(state.biddingPlayerIndex, 3);
+      expect(state.biddingTeam, Team.eastWest);
+      expect(state.leadPlayerIndex, 3);
+      expect(state.trumpSuit, Suit.hearts);
+    });
+
+    test('accepting is only allowed on the last player\'s turn', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 7, Suit.spades, const []);
+
+      expect(() => engine.applyAccept(state, order, 2, Suit.hearts, const []),
+          throwsA(isA<StateError>()));
+    });
+
+    test('accepting requires an existing standing bid', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyPass(state, order, 0);
+      state = engine.applyPass(state, order, 2);
+      state = engine.applyPass(state, order, 1);
+
+      expect(() => engine.applyAccept(state, order, 3, Suit.hearts, const []),
+          throwsA(isA<StateError>()));
+    });
+
+    test('accepting still enforces the Koz rule for the new trump', () {
+      final order = biddingOrder(0); // [0,2,1,3]
+      var state = BidState.initial();
+      state = engine.applyBid(state, order, 0, 7, Suit.spades, const []);
+      state = engine.applyPass(state, order, 2);
+      state = engine.applyPass(state, order, 1);
+
+      final tooManyHearts = List.generate(
+          5, (i) => Card(Rank.values[i], Suit.hearts)); // 5 > 7-3
+      expect(
+          () => engine.applyAccept(state, order, 3, Suit.hearts, tooManyHearts),
+          throwsA(isA<ArgumentError>()));
     });
 
     test('last player may still raise instead of accepting', () {

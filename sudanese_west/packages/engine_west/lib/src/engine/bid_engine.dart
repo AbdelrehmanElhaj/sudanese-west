@@ -59,23 +59,25 @@ class BidEngine {
   }
 
   /// Returns the updated BidState after a player passes.
-  /// [order] is the biddingOrder list for this round. If the last player
-  /// passes while a standing bid exists, they've accepted it as-is and
-  /// bidding completes with that bid. If nobody ever bid, it's a redeal.
+  /// [order] is the biddingOrder list for this round. If nobody ever bid,
+  /// the last player passing triggers a redeal. If a standing bid exists,
+  /// the last player may not simply pass on it — they must call
+  /// [applyAccept] instead, since accepting requires naming their own trump.
   BidState applyPass(BidState state, List<int> order, int playerIndex) {
     if (order[state.turnIndex] != playerIndex) {
       throw StateError('Not player $playerIndex\'s turn to pass');
     }
 
+    final isLastTurn = state.turnIndex == order.length - 1;
+    if (isLastTurn && state.bidValue != null) {
+      throw StateError(
+          'Last player must call applyAccept (with a trump choice) instead of passing on a standing bid');
+    }
+
     final newPassed = List<bool>.from(state.passed);
     newPassed[state.turnIndex] = true;
-    final isLastTurn = state.turnIndex == order.length - 1;
 
     if (isLastTurn) {
-      if (state.bidValue != null) {
-        // Last player accepts the standing bid as-is.
-        return state.copyWith(passed: newPassed, isComplete: true);
-      }
       // Nobody ever bid → redeal.
       return state.copyWith(
         passed: newPassed,
@@ -87,6 +89,43 @@ class BidEngine {
     return state.copyWith(
       passed: newPassed,
       turnIndex: state.turnIndex + 1,
+    );
+  }
+
+  /// Returns the updated BidState after the last player in [order] accepts
+  /// the standing bid at its current value, becoming the new bidder and
+  /// naming their own [trumpSuit] (null = no-trump) before play starts.
+  /// Only valid on the last player's turn when a standing bid exists.
+  BidState applyAccept(
+    BidState state,
+    List<int> order,
+    int playerIndex,
+    Suit? trumpSuit,
+    List<Card> hand,
+  ) {
+    if (order[state.turnIndex] != playerIndex) {
+      throw StateError('Not player $playerIndex\'s turn to bid');
+    }
+    if (state.turnIndex != order.length - 1) {
+      throw StateError('Only the last player in the bidding order may accept');
+    }
+    if (state.bidValue == null) {
+      throw StateError('There is no standing bid to accept');
+    }
+    if (!isKozRuleValid(hand, state.bidValue!, trumpSuit)) {
+      throw ArgumentError(
+          'Koz rule violated: too many trump cards for bid ${state.bidValue}');
+    }
+
+    final newPassed = List<bool>.from(state.passed);
+    newPassed[state.turnIndex] = true;
+    return state.copyWith(
+      passed: newPassed,
+      trumpSuit: () => trumpSuit,
+      biddingPlayerIndex: playerIndex,
+      biddingTeam: teamOf(playerIndex),
+      leadPlayerIndex: playerIndex,
+      isComplete: true,
     );
   }
 

@@ -130,6 +130,12 @@ class WestEngine implements GameFacade {
     _applyPass(seatIndex, order);
   }
 
+  void applyAcceptForSeat(int seatIndex, Suit? trumpSuit) {
+    _assertPhase(EnginePhase.bidding);
+    final order = biddingOrder(_match.starterIndex);
+    _applyAccept(seatIndex, trumpSuit, order);
+  }
+
   void applyPlayForSeat(int seatIndex, Card card) {
     _assertPhase(EnginePhase.playing);
     _applyCardPlay(seatIndex, card);
@@ -194,6 +200,14 @@ class WestEngine implements GameFacade {
     _applyPass(humanIndex, order);
   }
 
+  /// Accept the standing bid as the last bidder, naming [trumpSuit] (null =
+  /// no-trump) as the new bidder before play starts.
+  void humanAccept(Suit? trumpSuit) {
+    _assertPhase(EnginePhase.bidding);
+    final order = biddingOrder(_match.starterIndex);
+    _applyAccept(humanIndex, trumpSuit, order);
+  }
+
   void _applyBid(
       int playerIndex, int bidValue, Suit? trumpSuit, List<int> order) {
     final newBid = _bid.applyBid(_round!.bidState, order, playerIndex,
@@ -227,22 +241,23 @@ class WestEngine implements GameFacade {
       return;
     }
 
-    if (newBid.isComplete) {
-      // Last player accepted the standing bid as-is — start play.
-      _round = _round!.copyWith(
-        currentTrick: TrickState(
-          leadPlayerIndex: newBid.leadPlayerIndex!,
-          trumpSuit: newBid.trumpSuit,
-        ),
-      );
-      _phase = EnginePhase.playing;
-      _notify();
-      _scheduleBotPlay();
-      return;
-    }
-
     _notify();
     _advanceBotBids();
+  }
+
+  void _applyAccept(int playerIndex, Suit? trumpSuit, List<int> order) {
+    final newBid = _bid.applyAccept(
+        _round!.bidState, order, playerIndex, trumpSuit, _round!.hands[playerIndex]);
+    _round = _round!.copyWith(
+      bidState: newBid,
+      currentTrick: TrickState(
+        leadPlayerIndex: newBid.leadPlayerIndex!,
+        trumpSuit: newBid.trumpSuit,
+      ),
+    );
+    _phase = EnginePhase.playing;
+    _notify();
+    _scheduleBotPlay();
   }
 
   void _advanceBotBids() {
@@ -267,6 +282,11 @@ class WestEngine implements GameFacade {
           _bot.decideBid(c, r.hands[c], currentBid: r.bidState.bidValue);
       if (action.bidValue != null) {
         _applyBid(c, action.bidValue!, action.trumpSuit, o);
+      } else if (r.bidState.turnIndex == o.length - 1 &&
+          r.bidState.bidValue != null) {
+        // Last bidder declining to raise must accept with their own trump.
+        final trump = _bot.decideAcceptTrump(r.hands[c], r.bidState.bidValue!);
+        _applyAccept(c, trump, o);
       } else {
         _applyPass(c, o);
       }

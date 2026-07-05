@@ -34,6 +34,7 @@ class GameNotifier extends Notifier<int> {
 
   void bid(int bidValue, Suit? trumpSuit) => engine.humanBid(bidValue, trumpSuit);
   void pass() => engine.humanPass();
+  void accept(Suit? trumpSuit) => engine.humanAccept(trumpSuit);
   void playCard(Card card) => engine.humanPlay(card);
   void nextRound() => engine.proceedToNextRound();
 }

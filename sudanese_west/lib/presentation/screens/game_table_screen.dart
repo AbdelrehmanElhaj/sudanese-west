@@ -46,6 +46,7 @@ class GameTableScreen extends ConsumerWidget {
     final GameFacade facade;
     final void Function(int, Suit?) onBid;
     final VoidCallback onPass;
+    final void Function(Suit?) onAccept;
     final void Function(Card) onPlayCard;
     final VoidCallback onNextRound;
     final VoidCallback? onRestartMatch; // null = use built-in SP restart
@@ -61,6 +62,7 @@ class GameTableScreen extends ConsumerWidget {
       facade = f;
       onBid = (v, s) => mpNotifier.sendBid(v, s);
       onPass = mpNotifier.sendPass;
+      onAccept = mpNotifier.sendAccept;
       onPlayCard = mpNotifier.sendPlay;
       onNextRound = mpNotifier.sendNextRound;
       onRestartMatch = () => Navigator.of(context).pop();
@@ -70,6 +72,7 @@ class GameTableScreen extends ConsumerWidget {
       facade = notifier.engine;
       onBid = (v, s) => notifier.bid(v, s);
       onPass = notifier.pass;
+      onAccept = notifier.accept;
       onPlayCard = notifier.playCard;
       onNextRound = notifier.nextRound;
       // A host mid-multiplayer-match must start a fresh multiplayer match
@@ -114,6 +117,7 @@ class GameTableScreen extends ConsumerWidget {
                   facade: facade,
                   onBid: onBid,
                   onPass: onPass,
+                  onAccept: onAccept,
                   seatNames: seatNames,
                 ),
               ),
@@ -687,12 +691,14 @@ class _BiddingOverlay extends ConsumerStatefulWidget {
   final GameFacade facade;
   final void Function(int, Suit?) onBid;
   final VoidCallback onPass;
+  final void Function(Suit?) onAccept;
   final Map<int, String>? seatNames;
 
   const _BiddingOverlay({
     required this.facade,
     required this.onBid,
     required this.onPass,
+    required this.onAccept,
     this.seatNames,
   });
 
@@ -848,9 +854,12 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
 
         const SizedBox(height: 14),
 
-        const Text('الأتم:',
+        Text(
+            canAccept
+                ? 'الأتم: (اختره لقبول المزايدة $currentBid)'
+                : 'الأتم:',
             textDirection: TextDirection.rtl,
-            style: TextStyle(color: Colors.white60, fontSize: 13)),
+            style: const TextStyle(color: Colors.white60, fontSize: 13)),
         const SizedBox(height: 6),
         Wrap(
           alignment: WrapAlignment.center,
@@ -892,7 +901,11 @@ class _BiddingOverlayState extends ConsumerState<_BiddingOverlay> {
                   foregroundColor: Colors.white60,
                   side: const BorderSide(color: Colors.white24),
                 ),
-                onPressed: widget.onPass,
+                onPressed: canAccept
+                    ? (_trumpDecided
+                        ? () => widget.onAccept(_selectedTrump)
+                        : null)
+                    : widget.onPass,
                 child: Text(canAccept ? 'قبول' : 'تمرير',
                     textDirection: TextDirection.rtl),
               ),

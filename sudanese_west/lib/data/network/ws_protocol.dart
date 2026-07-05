@@ -21,6 +21,7 @@ class WsProtocol {
   // GAME_ACTION sub-types
   static const String actionBid = 'BID';
   static const String actionPass = 'PASS';
+  static const String actionAccept = 'ACCEPT';
   static const String actionPlayCard = 'PLAY_CARD';
   static const String actionNextRound = 'NEXT_ROUND';
 }

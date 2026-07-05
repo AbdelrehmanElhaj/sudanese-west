@@ -231,6 +231,20 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     }
   }
 
+  void sendAccept(Suit? trumpSuit) {
+    if (state.role == MultiplayerRole.host) {
+      ref.read(gameNotifierProvider.notifier).accept(trumpSuit);
+    } else {
+      _ws.send({
+        'type': WsProtocol.gameAction,
+        'action': {
+          'type': WsProtocol.actionAccept,
+          'trumpSuit': GameSerializer.encodeSuit(trumpSuit),
+        },
+      });
+    }
+  }
+
   void sendPlay(Card card) {
     if (state.role == MultiplayerRole.host) {
       ref.read(gameNotifierProvider.notifier).playCard(card);
@@ -365,6 +379,9 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
         engine.applyBidForSeat(seatIndex, bidValue, trump);
       } else if (actionType == WsProtocol.actionPass) {
         engine.applyPassForSeat(seatIndex);
+      } else if (actionType == WsProtocol.actionAccept) {
+        final trump = GameSerializer.decodeSuit(action['trumpSuit'] as String?);
+        engine.applyAcceptForSeat(seatIndex, trump);
       } else if (actionType == WsProtocol.actionPlayCard) {
         final card = GameSerializer.decodeCard(action['card'] as String);
         engine.applyPlayForSeat(seatIndex, card);

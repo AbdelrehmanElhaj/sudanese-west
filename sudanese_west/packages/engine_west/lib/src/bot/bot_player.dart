@@ -81,6 +81,16 @@ class BotPlayer {
     return (points / 3).round();
   }
 
+  /// Choose a trump suit when accepting the standing bid as the last bidder,
+  /// at the fixed [bidValue] (which can't be raised). Falls back to no-trump
+  /// if the bot's best suit would violate the Koz rule at that value.
+  Suit? decideAcceptTrump(List<Card> hand, int bidValue) {
+    final trump = _bestTrumpSuit(hand);
+    if (trump == null) return null;
+    final kozCount = hand.where((c) => c.suit == trump).length;
+    return kozCount <= bidValue - 3 ? trump : null;
+  }
+
   /// Pick the suit with the most cards as trump, null if no-trump is preferred.
   Suit? _bestTrumpSuit(List<Card> hand) {
     Suit? best;
