@@ -18,18 +18,33 @@ class BidEngine {
   /// gets one turn; a bid must exceed the current standing bid (if any).
   /// Bidding only completes once the last player in [order] has acted —
   /// earlier bids just raise the standing bid and move to the next player.
+  ///
+  /// [hand] is validated against the Koz rule. These checks are real
+  /// exceptions (not `assert`) because this is also the entry point for
+  /// bids relayed from remote clients over the multiplayer connection,
+  /// where `assert` would be silently stripped in release builds.
   BidState applyBid(
     BidState state,
     List<int> order,
     int playerIndex,
     int bidValue,
     Suit? trumpSuit,
+    List<Card> hand,
   ) {
-    assert(bidValue >= 7 && bidValue <= 13);
-    assert(order[state.turnIndex] == playerIndex,
-        'Not this player\'s turn to bid');
-    assert(state.bidValue == null || bidValue > state.bidValue!,
-        'Bid must be higher than the current standing bid');
+    if (bidValue < 7 || bidValue > 13) {
+      throw ArgumentError('Bid value must be between 7 and 13, got $bidValue');
+    }
+    if (order[state.turnIndex] != playerIndex) {
+      throw StateError('Not player $playerIndex\'s turn to bid');
+    }
+    if (state.bidValue != null && bidValue <= state.bidValue!) {
+      throw ArgumentError(
+          'Bid must be higher than the current standing bid (${state.bidValue})');
+    }
+    if (!isKozRuleValid(hand, bidValue, trumpSuit)) {
+      throw ArgumentError(
+          'Koz rule violated: too many trump cards for bid $bidValue');
+    }
 
     final isLastTurn = state.turnIndex == order.length - 1;
     return state.copyWith(
@@ -48,8 +63,9 @@ class BidEngine {
   /// passes while a standing bid exists, they've accepted it as-is and
   /// bidding completes with that bid. If nobody ever bid, it's a redeal.
   BidState applyPass(BidState state, List<int> order, int playerIndex) {
-    assert(order[state.turnIndex] == playerIndex,
-        'Not this player\'s turn to pass');
+    if (order[state.turnIndex] != playerIndex) {
+      throw StateError('Not player $playerIndex\'s turn to pass');
+    }
 
     final newPassed = List<bool>.from(state.passed);
     newPassed[state.turnIndex] = true;

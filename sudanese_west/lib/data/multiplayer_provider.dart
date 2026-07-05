@@ -90,6 +90,7 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
   final _ws = WsClient();
   StreamSubscription<Map<String, dynamic>>? _sub;
   String? _playerName; // stored for reconnection
+  String? _seatToken; // proves ownership of our seat when sending REJOIN_ROOM
 
   @override
   MultiplayerState build() {
@@ -104,12 +105,16 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     // Re-authenticate after an automatic reconnection.
     _ws.onReconnected = () {
       final code = state.roomCode;
-      if (code != null && state.seatIndex >= 0 && _playerName != null) {
+      if (code != null &&
+          state.seatIndex >= 0 &&
+          _playerName != null &&
+          _seatToken != null) {
         _ws.send({
           'type': WsProtocol.rejoinRoom,
           'roomCode': code,
           'seatIndex': state.seatIndex,
           'playerName': _playerName,
+          'token': _seatToken,
         });
       }
       // If the host's connection dropped right as the match started, the
@@ -255,6 +260,7 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     _sub?.cancel();
     _sub = null;
     _ws.disconnect();
+    _seatToken = null;
     state = MultiplayerState.initial;
   }
 
@@ -264,6 +270,7 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     final type = msg['type'] as String;
 
     if (type == WsProtocol.roomCreated) {
+      _seatToken = msg['token'] as String?;
       state = state.copyWith(
         role: MultiplayerRole.host,
         roomCode: msg['roomCode'] as String,
@@ -275,6 +282,7 @@ class MultiplayerNotifier extends Notifier<MultiplayerState> {
     }
 
     if (type == WsProtocol.roomJoined) {
+      _seatToken = msg['token'] as String?;
       state = state.copyWith(
         role: MultiplayerRole.guest,
         roomCode: msg['roomCode'] as String,

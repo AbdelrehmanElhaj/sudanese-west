@@ -100,8 +100,12 @@ class WestEngine implements GameFacade {
     if (_phase != EnginePhase.playing || _round == null) return [];
     final round = _round!;
     final trick = round.currentTrick;
-    final current = trick.isComplete ? trick.winnerIndex! : trick.nextPlayerIndex;
-    if (current != seatIndex) return [];
+    // A completed trick is shown briefly (see the 700ms delay in
+    // _applyCardPlay) before the next trick actually starts. Nobody may act
+    // during that window — otherwise the trick winner appears able to play
+    // a 5th card into the already-complete trick.
+    if (trick.isComplete) return [];
+    if (trick.nextPlayerIndex != seatIndex) return [];
     final isLeader =
         trick.leadPlayerIndex == seatIndex && trick.playedCards.isEmpty;
     return _play.legalCards(
@@ -192,8 +196,8 @@ class WestEngine implements GameFacade {
 
   void _applyBid(
       int playerIndex, int bidValue, Suit? trumpSuit, List<int> order) {
-    final newBid = _bid.applyBid(
-        _round!.bidState, order, playerIndex, bidValue, trumpSuit);
+    final newBid = _bid.applyBid(_round!.bidState, order, playerIndex,
+        bidValue, trumpSuit, _round!.hands[playerIndex]);
     _round = _round!.copyWith(bidState: newBid);
 
     if (!newBid.isComplete) {
@@ -278,7 +282,13 @@ class WestEngine implements GameFacade {
 
   void _applyCardPlay(int playerIndex, Card card) {
     final round = _round!;
-    final newTrick = _play.applyPlay(round.currentTrick, playerIndex, card);
+    final newTrick = _play.applyPlay(
+      round.currentTrick,
+      playerIndex,
+      card,
+      hand: round.hands[playerIndex],
+      trickNumber: round.trickNumber,
+    );
     final newHands = List<List<Card>>.from(round.hands.map(List<Card>.from));
     newHands[playerIndex].remove(card);
 

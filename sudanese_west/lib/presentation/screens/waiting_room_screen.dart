@@ -29,6 +29,20 @@ class WaitingRoomScreen extends ConsumerWidget {
             ),
           ),
         );
+        return;
+      }
+
+      // Surface connection errors (server unreachable, host left, etc.)
+      // instead of leaving the player stuck on a waiting room that will
+      // never progress.
+      if (next.lobbyPhase == LobbyPhase.error && next.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text(next.errorMessage!, textDirection: TextDirection.rtl),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
       }
     });
 

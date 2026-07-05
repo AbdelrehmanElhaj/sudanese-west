@@ -43,11 +43,14 @@ class BotPlayer {
     int bid = strength.clamp(floor.clamp(7, 13), 13);
     final trump = _bestTrumpSuit(hand);
 
-    // Koz rule: if naming a suit, bid must be >= kozCount + 3.
+    // Koz rule: if naming a suit, bid must be >= kozCount + 3. Deliberately
+    // not clamped to 13 here — an extreme hand can require a bid above 13,
+    // which is caught by the `bid > 13` check below and turned into a pass
+    // rather than letting the bot submit a bid that still violates Koz.
     if (trump != null) {
       final kozCount = hand.where((c) => c.suit == trump).length;
       final minBid = kozCount + 3;
-      if (bid < minBid) bid = minBid.clamp(7, 13);
+      if (bid < minBid) bid = minBid;
     }
 
     if (bid < floor || bid > 13) return const BotBidAction.pass();

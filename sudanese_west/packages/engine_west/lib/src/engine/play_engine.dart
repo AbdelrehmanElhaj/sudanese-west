@@ -37,9 +37,42 @@ class PlayEngine {
   }
 
   /// Applies a card play to the trick. Returns updated TrickState.
-  TrickState applyPlay(TrickState trick, int playerIndex, Card card) {
-    assert(!trick.isComplete, 'Trick is already complete');
-    assert(!trick.hasPlayed(playerIndex), 'Player already played this trick');
+  ///
+  /// [hand] and [trickNumber], when supplied, are used to verify the card is
+  /// actually legal (follow-suit / forced-trump-lead) for [playerIndex]. All
+  /// checks here are real exceptions (not `assert`) because this is also the
+  /// entry point for plays relayed from remote clients over the multiplayer
+  /// connection, where `assert` would be silently stripped in release builds.
+  TrickState applyPlay(
+    TrickState trick,
+    int playerIndex,
+    Card card, {
+    List<Card>? hand,
+    int? trickNumber,
+  }) {
+    if (trick.isComplete) {
+      throw StateError('Trick is already complete');
+    }
+    if (trick.hasPlayed(playerIndex)) {
+      throw StateError('Player $playerIndex already played this trick');
+    }
+    if (trick.nextPlayerIndex != playerIndex) {
+      throw StateError(
+          'Not player $playerIndex\'s turn to play (expected ${trick.nextPlayerIndex})');
+    }
+    if (hand != null && trickNumber != null) {
+      final isLeader =
+          trick.leadPlayerIndex == playerIndex && trick.playedCards.isEmpty;
+      final legal = legalCards(
+        hand: hand,
+        trick: trick,
+        trickNumber: trickNumber,
+        isLeader: isLeader,
+      );
+      if (!legal.contains(card)) {
+        throw ArgumentError('Card $card is not legal to play in this trick');
+      }
+    }
 
     final newPlayed = [...trick.playedCards, PlayedCard(playerIndex, card)];
     final newLeadSuit = trick.leadSuit ?? card.suit;
